@@ -8,7 +8,7 @@ Kullanım:  python3 takip.py            -> normal kontrol
            python3 takip.py --test     -> WhatsApp'a test mesajı
            python3 takip.py --hepsi    -> mevcut ilanların listesini de gönder
 """
-import html, json, re, sys, time, unicodedata, urllib.parse, urllib.request
+import gzip, html, json, re, sys, time, unicodedata, urllib.parse, urllib.request
 from pathlib import Path
 
 DIR = Path(__file__).resolve().parent
@@ -30,9 +30,9 @@ ARAMALAR = [
     ("Dört Mezhebe Göre İslam Fıkhı", "dört mezhebe göre islam fıkhı", ["dortmezheb", "fikh"], 900),
     ("Cezîrî fıkıh kitabı", "abdurrahman ceziri", ["ceziri"], 900),
 ]
-SAYFA = 3  # yeni eklenenlere göre ilk kaç sayfa taranacak
+SAYFA = 1  # yeni eklenenlere göre ilk kaç sayfa taranacak (10 dk aralıkla 1 sayfa yeterli)
 H = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
-     "Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Accept-Language": "tr-TR,tr;q=0.9"}
+     "Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Accept-Language": "tr-TR,tr;q=0.9", "Accept-Encoding": "gzip"}
 
 ITEM = re.compile(
     r'<a href="(https://www\.nadirkitap\.com/[^"]*?kitap(\d+)\.html)" title="([^"]*)" class="nadirBook"'
@@ -40,7 +40,11 @@ ITEM = re.compile(
 
 
 def get(url):
-    return urllib.request.urlopen(urllib.request.Request(url, headers=H), timeout=40).read().decode("utf-8", "replace")
+    r = urllib.request.urlopen(urllib.request.Request(url, headers=H), timeout=40)
+    veri = r.read()
+    if r.headers.get("Content-Encoding") == "gzip":
+        veri = gzip.decompress(veri)
+    return veri.decode("utf-8", "replace")
 
 
 def norm(t):
