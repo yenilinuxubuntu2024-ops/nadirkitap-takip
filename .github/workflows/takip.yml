@@ -1,0 +1,27 @@
+name: nadirkitap-takip
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: takip
+  cancel-in-progress: false
+jobs:
+  takip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Nadirkitap kontrolü
+        run: python3 takip.py
+        env:
+          TELEFON: ${{ secrets.TELEFON }}
+          APIKEY: ${{ secrets.APIKEY }}
+      - name: Görülen ilanları kaydet
+        run: |
+          git config user.name "takip-bot"
+          git config user.email "takip-bot@users.noreply.github.com"
+          git add gorulenler.json
+          git diff --cached --quiet || (git commit -m "görülen ilanlar güncellendi" && git push)
