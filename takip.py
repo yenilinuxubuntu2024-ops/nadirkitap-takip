@@ -42,7 +42,19 @@ ARAMALAR = [
     ("Hayatü's-Sahabe", ["hayatüs sahabe"], [["hayat", "sahabe"]], 700),
     ("Dört Mezhebe Göre İslam Fıkhı", ["dört mezhebe göre islam fıkhı"], [["dortmezheb", "fikh"]], 900),
     ("Cezîrî fıkıh kitabı", ["abdurrahman ceziri"], [["ceziri"]], 900),
+    # defterden: yalnızca alış sınırına (esik.json) uyan ilanlar bildirilir
+    ("Ansiklopedik Kur'an Kavramları", ["ansiklopedik kuran kavramları"], [["kavramlari"]], None),
+    ("Fetâvâ-yı Hindiyye", ["fetevayi hindiyye"], [["hindiyye"]], None),
+    ("Sünen-i İbn Mâce Şerhi", ["sünen-i ibn mace tercemesi ve şerhi"], [["mace"]], None),
+    ("Asım Köksal İslam Tarihi", ["asım köksal islam tarihi"], [["koksal"]], None),
+    ("Satır Arası Kelime Kelime Meal", ["satır arası kelime kelime kuranı kerim meali"], [["satirarasi"]], None),
+    ("Ayet ve Hadislerle İslami Hayat", ["ayet ve hadislerle islami hayat"], [["islamihayat"]], None),
+    ("Zuhaylî İslam Fıkhı Ansiklopedisi", ["islam fıkhı ansiklopedisi zuhayli"], [["zuhayli"]], None),
+    ("Temel İslam Ansiklopedisi", ["temel islam ansiklopedisi"], [["temelislamansiklopedisi"]], None),
+    ("Hanefiler İçin İslam Fıkhı", ["hanefiler için islam fıkhı"], [["hanefilericin"]], None),
+    ("Sıtkı Gülle Kelime Anlamlı Meal", ["sıtkı gülle meal"], [["gulle"]], None),
 ]
+ESIK = DIR / "esik.json"  # senin alış sınırların (GitHub'a yüklenmez)
 SAYFA = 1  # yeni eklenenlere göre ilk kaç sayfa taranacak (10 dk aralıkla 1 sayfa yeterli)
 H = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
      "Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Accept-Language": "tr-TR,tr;q=0.9", "Accept-Encoding": "gzip"}
@@ -74,12 +86,13 @@ def fiyat_sayi(f):
 
 
 def tur(baslik):
-    """Fiyat karşılaştırma grubu: 'takim16' gibi (tam takım + cilt sayısı) ya da 'diger'.
-    Eksik takımlar ve cilt sayısı belli olmayanlar karşılaştırılmaz."""
+    """Fiyat karşılaştırma grubu: 'takim16' gibi (cilt sayısı belli tam takım) ya da 'diger'.
+    '16 cilt', '16 cild', '(1-2) cilt' sayılır; '3. cilt' gibi tek ciltler ve eksik takımlar sayılmaz."""
     n = norm(baslik)
-    if "eksik" in n or not re.search(r"takim|tamtakim|set", n):
+    if any(k in n for k in ("eksik", "yoktur", "ciltyok", "haric")):
         return "diger"
-    sayilar = [int(x) for x in re.findall(r"(\d+)(?:cilt|kitap)", n)]
+    b = baslik.replace("İ", "i").replace("I", "ı").lower()
+    sayilar = [int(x) for x in re.findall(r"(\d+)\s*\)?\s*(?:cilt|cild|kitap)", b)]
     sayilar = [x for x in sayilar if 2 <= x <= 60]
     return f"takim{max(sayilar)}" if sayilar else "diger"
 
@@ -121,8 +134,16 @@ def whatsapp(metin):
         print("WhatsApp hatası:", re.sub(r"<[^>]+>", " ", r)[:300])
 
 
+def tl(x):
+    return f"{x:,.0f}".replace(",", ".")
+
+
 def satir(x):
     s = f"📖 {x['baslik']}\n💰 {x['fiyat']}"
+    if x.get("hedef"):
+        h = x["hedef"]
+        s = (f"🎯 ALINIR! (alış sınırın {tl(h['ust'])} TL · ort. satışın {tl(h['satis'])} TL · "
+             f"tahmini kâr ~{tl(h['satis'] - x['tl'])} TL)\n") + s
     if x.get("ortanca"):
         s = "🔥 FIRSAT!\n" + s + f" (piyasa ~{x['ortanca']:,.0f} TL, %{x['indirim']:.0f} ucuz)".replace(",", ".")
     return s + "\n" + x["link"]
@@ -144,6 +165,7 @@ def main():
     if isinstance(kayit, list):  # eski biçim: sadece Tefhim
         kayit = {"tefhimül kuran": kayit}
     fiyat_kayit = json.loads(FIYATLAR.read_text()) if FIYATLAR.exists() else {}
+    esik = json.loads(ESIK.read_text()) if ESIK.exists() else {}
     gonderilen = set()  # aynı ilan birden çok aramada çıkarsa bir kez bildir
     for ad, kelimeler, sart, min_fiyat in ARAMALAR:
         anahtar = kelimeler[0]
@@ -163,22 +185,28 @@ def main():
             firsat = v["tur"] != "diger" and orta and v["tl"] > 0 and v["tl"] <= orta * (1 - FIRSAT_ORAN)
             if firsat:
                 v["ortanca"], v["indirim"] = orta, 100 * (1 - v["tl"] / orta)
-            # alt sınırın üstündekiler + sınırın altında kalsa da fırsat olan takımlar
-            if v["tl"] > min_fiyat or firsat:
+            h = esik.get(anahtar)
+            hedef = h and v["tur"] == f"takim{h['cilt']}" and h["alt"] <= v["tl"] <= h["ust"]
+            if hedef:
+                v["hedef"] = h
+            # alt sınırın üstündekiler + fırsat olan takımlar + alış sınırına uyanlar
+            if (min_fiyat is not None and v["tl"] > min_fiyat) or firsat or hedef:
                 bildir.append(v)
         gonderilen |= set(simdi)
         for kid, v in simdi.items():
             gecmis[kid] = [v["tl"], v["tur"]]
         sinir = f" ({min_fiyat:.0f} TL üstü)" if min_fiyat else ""
+        if min_fiyat is None:
+            sinir = " (alış sınırına uyan)"
         if "--hepsi" in sys.argv and simdi:
-            liste = [v for v in simdi.values() if v["tl"] > min_fiyat]
+            liste = [v for v in simdi.values() if min_fiyat is not None and v["tl"] > min_fiyat]
             if liste:
                 gonder(liste, f"📚 Nadirkitap'ta şu an {len(liste)} {ad} ilanı{sinir}:")
         elif bildir and not ilk:
-            bildir.sort(key=lambda x: not x.get("ortanca"))  # fırsatlar önce
-            n_f = sum(1 for x in bildir if x.get("ortanca"))
+            bildir.sort(key=lambda x: (not x.get("hedef"), not x.get("ortanca")))  # alınırlar, fırsatlar önce
+            n_f = sum(1 for x in bildir if x.get("ortanca") or x.get("hedef"))
             bas = f"🆕 Nadirkitap'a {len(bildir)} yeni {ad} ilanı düştü{sinir}"
-            gonder(bildir, bas + (f" — {n_f} tanesi 🔥 FIRSAT:" if n_f else ":"))
+            gonder(bildir, bas + (f" — {n_f} tanesi 🎯/🔥 dikkat:" if n_f else ":"))
         kayit[anahtar] = sorted(gorulen | set(simdi))
         SEEN.write_text(json.dumps(kayit, ensure_ascii=False))
         FIYATLAR.write_text(json.dumps(fiyat_kayit, ensure_ascii=False))
